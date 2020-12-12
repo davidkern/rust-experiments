@@ -90,6 +90,10 @@ where
         }
     }
 
+    pub fn inspect(&self, inspector: fn(&State)) {
+        self.sender.send(Op::Inspect(inspector)).ok();
+    }
+
     pub fn mutate(&self, mutator: fn(&mut State)) {
         self.sender.send(Op::Mutate(mutator)).ok();
     }
@@ -112,6 +116,10 @@ pub async fn exercise_toggle() {
             process.start().await;
         },
         async move {
+            toggle.inspect(|state| {
+                println!("inspect: {:?}", state);
+            });
+
             toggle.toggle();
             toggle.toggle();
             toggle.toggle();
