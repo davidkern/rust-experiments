@@ -15,22 +15,30 @@ use std::fmt::Debug;
 // IMPLEMENTATION
 //
 
-pub enum Call<State> {
+pub enum Error {
+    NotSent,
+    NoReply,
+}
+
+pub type Result<Reply> = std::result::Result<Reply, Error>;
+
+pub enum Call<State, Reply> {
     Ref(fn(&State)),
     RefMut(fn(&mut State)),
+    RefReply(fn(&State, ReplySender<Reply>), ReplySender<Reply>),
 }
 
-pub struct Process<State>
+pub struct Process<State, Reply>
 {
     state: State,
-    receiver: CallReceiver<State>,
+    receiver: CallReceiver<State, Reply>,
 }
 
-pub struct Actor<State> {
-    sender: CallSender<State>
+pub struct Actor<State, Reply> {
+    sender: CallSender<State, Reply>
 }
 
-impl<State> Clone for Actor<State> {
+impl<State, Reply> Clone for Actor<State, Reply> {
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
@@ -38,15 +46,16 @@ impl<State> Clone for Actor<State> {
     }
 }
 
-type CallReceiver<State> = UnboundedReceiver<Call<State>>;
-type CallSender<State> = UnboundedSender<Call<State>>;
+type CallReceiver<State, Reply> = UnboundedReceiver<Call<State, Reply>>;
+type CallSender<State, Reply> = UnboundedSender<Call<State, Reply>>;
+type ReplyReceiver<Reply> = oneshot::Receiver<Reply>;
 type ReplySender<Reply> = oneshot::Sender<Reply>;
 
-impl<State> Process<State>
+impl<State, Reply> Process<State, Reply>
 where
     State: Debug,
 {
-    pub fn new_with_state(state: State) -> (Self, Actor<State>) {
+    pub fn new_with_state(state: State) -> (Self, Actor<State, Reply>) {
         let (sender, receiver) = unbounded_channel();
         (
             Self {
@@ -58,24 +67,27 @@ where
     }
 
     pub async fn start(&mut self) {
-        while let Some(op) = self.receiver.recv().await {
-            match op {
+        while let Some(call) = self.receiver.recv().await {
+            match call {
                 Call::Ref(caller) => {
                     caller(&self.state);
                 },
                 Call::RefMut(caller) => {
                     caller(&mut self.state);
                 },
+                Call::RefReply(caller, reply_sender) => {
+                    caller(&self.state, reply_sender);
+                }
             }
         }
     }
 }
 
-impl<State> Actor<State>
+impl<State, Reply> Actor<State, Reply>
 where
     State: Debug,
 {
-    pub fn new_with_sender(sender: CallSender<State>) -> Self {
+    pub fn new_with_sender(sender: CallSender<State, Reply>) -> Self {
         Self {
             sender,
         }
@@ -89,16 +101,19 @@ where
         self.sender.send(Call::RefMut(caller)).ok();
     }
 
-    // pub async fn mutate_and_reply(&self, mutator: fn(&mut State)) -> &State {
-    //
-    // }
+    pub async fn call_ref_reply(&self, caller: fn(&State, ReplySender<Reply>)) -> Reply {
+        let (reply_sender, reply_receiver) = oneshot::channel();
+        self.sender.send(Call::RefReply(caller, reply_sender)).ok();
+
+        reply_receiver.await.ok().unwrap()
+    }
 }
 
 //
 // USAGE
 //
 pub async fn exercise_toggle() {
-    let (mut process, toggle) = Process::<Toggle>::new_with_state(Toggle::Alpha);
+    let (mut process, toggle) = Process::<Toggle, Toggle>::new_with_state(Toggle::Alpha);
 
     let toggle_clone = toggle.clone();
 
@@ -107,6 +122,11 @@ pub async fn exercise_toggle() {
             process.start().await;
         },
         async move {
+            println!("received reply: {:?}", toggle.call_ref_reply(|state, reply| {
+                println!("sending reply: {:?}", state);
+                reply.send(*state).ok();
+            }).await);
+            
             toggle.call_ref(|state| {
                 println!("inspect: {:?}", state);
             });
@@ -125,13 +145,13 @@ pub async fn exercise_toggle() {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 enum Toggle {
     Alpha,
     Beta,
 }
 
-impl Actor<Toggle> {
+impl Actor<Toggle, Toggle> {
     pub fn toggle(&self) {
         self.call_ref_mut(|state| {
             println!("state: {:?}", state);
