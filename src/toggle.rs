@@ -2,35 +2,41 @@
 
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel, UnboundedReceiver};
 use std::ops::Deref;
-use crate::System;
+use crate::{System, State};
 use std::future::Future;
+use std::fmt::Debug;
 
 //
 // IMPLEMENTATION
 //
 
-pub trait ActorState<Message> {
-    fn receive(&mut self, msg: Message) {
+pub trait Mutable
+{
+    fn mutate(&mut self, mutator: fn(&mut Self)) {
+        mutator(self);
     }
 }
 
-pub struct Actor<State, Message> {
-    state: State,
-    receiver: Receiver<Message>,
-}
-
-pub struct Mailbox<Message> {
-    actor: Sender<Message>
-}
-
-type Receiver<State> = UnboundedReceiver<State>;
-type Sender<State> = UnboundedSender<State>;
-
-impl<State, Message> Actor<State, Message>
+pub struct Actor<State>
 where
-    State: ActorState<Message>,
+    State: Mutable,
 {
-    pub fn new_with_state(state: State) -> (Self, Mailbox<Message>) {
+    state: State,
+    receiver: Receiver<State>,
+}
+
+pub struct Mailbox<State> {
+    actor: Sender<State>
+}
+
+type Receiver<State> = UnboundedReceiver<fn(&mut State)>;
+type Sender<State> = UnboundedSender<fn(&mut State)>;
+
+impl<State> Actor<State>
+where
+    State: Mutable + Debug,
+{
+    pub fn new_with_state(state: State) -> (Self, Mailbox<State>) {
         let (sender, receiver) = unbounded_channel();
         let actor = Self {
             state,
@@ -42,44 +48,63 @@ where
     }
 
     pub async fn start(&mut self) {
-        while let Some(msg) = self.receiver.recv().await {
-            self.state.receive(msg);
+        while let Some(mutator) = self.receiver.recv().await {
+            self.state.mutate(mutator);
         }
     }
 }
 
-impl<Message> Mailbox<Message> {
-    pub fn new_with_sender(sender: Sender<Message>) -> Self {
+impl<State> Mailbox<State>
+where
+    State: Debug,
+{
+    pub fn new_with_sender(sender: Sender<State>) -> Self {
         Self {
             actor: sender,
         }
+    }
+
+    pub fn mutate(&self, mutator: fn(&mut State)) {
+        self.actor.send(mutator).ok();
     }
 }
 
 //
 // USAGE
 //
+pub async fn exercise_toggle() {
+    let (mut actor_toggle, toggle) = Actor::<Toggle>::new_with_state(Toggle::Alpha);
 
-fn exercise_toggle() {
-    let (actor_toggle, toggle) = Actor::<ToggleState, Toggle>::new_with_state(ToggleState::Alpha);
-
-    // tokio::spawn(async { actor_toggle.start().await; }).await.unwrap();
-    //
-    // toggle.toggle().await;
-    // toggle.toggle().await;
+    let (state, execution) = tokio::join! {
+        async move {
+            actor_toggle.start().await;
+        },
+        async move {
+            toggle.toggle();
+            toggle.toggle();
+            toggle.toggle();
+            toggle.toggle();
+        },
+    };
 }
 
-struct Toggle;
-
-enum ToggleState {
+#[derive(Debug)]
+enum Toggle {
     Alpha,
     Beta,
 }
 
-impl ActorState<Toggle> for ToggleState { }
+impl Mutable for Toggle { }
 
-impl Actor<Toggle, ToggleState> {
-    pub async fn toggle(&self) {
+impl Mailbox<Toggle> {
+    pub fn toggle(&self) {
+        self.mutate(|state| {
+            println!("state: {:?}", state);
+            match state {
+               Toggle::Alpha => *state = Toggle::Beta,
+               Toggle::Beta => *state = Toggle::Alpha,
+            }
+        });
     }
 }
 

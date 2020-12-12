@@ -1,20 +1,23 @@
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender, UnboundedReceiver};
 use std::ops::Deref;
+use crate::toggle::exercise_toggle;
 
 mod toggle;
 
 #[tokio::main]
 async fn main() {
-    let (system, mut state) = System::new();
+    exercise_toggle().await;
 
-    system.boop();
-    system.stop();
-
-    system.boop();
-    system.stop();
-
-    state.start().await;
-    state.start().await;
+    // let (system, mut state) = System::new();
+    //
+    // system.boop();
+    // system.stop();
+    //
+    // system.boop();
+    // system.stop();
+    //
+    // state.start().await;
+    // state.start().await;
 }
 
 enum Msg {
