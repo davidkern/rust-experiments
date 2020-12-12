@@ -26,6 +26,7 @@ pub enum Call<State, Reply> {
     Ref(fn(&State)),
     RefMut(fn(&mut State)),
     RefReply(fn(&State, ReplySender<Reply>), ReplySender<Reply>),
+    RefMutReply(fn(&State, ReplySender<Reply>), ReplySender<Reply>),
 }
 
 pub struct Process<State, Reply>
@@ -77,6 +78,9 @@ where
                 },
                 Call::RefReply(caller, reply_sender) => {
                     caller(&self.state, reply_sender);
+                },
+                Call::RefMutReply(caller, reply_sender) => {
+                    caller(&mut self.state, reply_sender);
                 }
             }
         }
@@ -107,6 +111,13 @@ where
 
         reply_receiver.await.ok().unwrap()
     }
+
+    pub async fn call_ref_mut_reply(&self, caller: fn(&State, ReplySender<Reply>)) -> Reply {
+        let (reply_sender, reply_receiver) = oneshot::channel();
+        self.sender.send(Call::RefMutReply(caller, reply_sender)).ok();
+
+        reply_receiver.await.ok().unwrap()
+    }
 }
 
 //
@@ -126,7 +137,7 @@ pub async fn exercise_toggle() {
                 println!("sending reply: {:?}", state);
                 reply.send(*state).ok();
             }).await);
-            
+
             toggle.call_ref(|state| {
                 println!("inspect: {:?}", state);
             });
