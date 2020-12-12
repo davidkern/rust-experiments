@@ -33,13 +33,6 @@ pub trait Mutable
     }
 }
 
-// pub trait Measurable<Data>
-// {
-//     fn measure(&self, extractor: fn(&Self) -> Data) {
-//         measure(self)
-//     }
-// }
-
 impl<State> Inspectable for State { }
 impl<State> Mutable for State { }
 //impl<State, Data> Measurable<Data> for State { }
@@ -49,11 +42,11 @@ where
     State: Mutable,
 {
     state: State,
-    receiver: Receiver<State>,
+    receiver: CallReceiver<State>,
 }
 
 pub struct Actor<State> {
-    sender: Sender<State>
+    sender: CallSender<State>
 }
 
 impl<State> Clone for Actor<State> {
@@ -64,9 +57,9 @@ impl<State> Clone for Actor<State> {
     }
 }
 
-type Receiver<State> = UnboundedReceiver<Op<State>>;
-type Sender<State> = UnboundedSender<Op<State>>;
-type Reply<Data> = oneshot::Sender<Data>;
+type CallReceiver<State> = UnboundedReceiver<Op<State>>;
+type CallSender<State> = UnboundedSender<Op<State>>;
+type ReplySender<Reply> = oneshot::Sender<Reply>;
 
 impl<State> Process<State>
 where
@@ -101,7 +94,7 @@ impl<State> Actor<State>
 where
     State: Debug,
 {
-    pub fn new_with_sender(sender: Sender<State>) -> Self {
+    pub fn new_with_sender(sender: CallSender<State>) -> Self {
         Self {
             sender,
         }
