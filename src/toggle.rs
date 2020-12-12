@@ -15,13 +15,6 @@ use std::fmt::Debug;
 // IMPLEMENTATION
 //
 
-pub enum Error {
-    NotSent,
-    NoReply,
-}
-
-pub type Result<Reply> = std::result::Result<Reply, Error>;
-
 pub enum Call<State, Reply> {
     Ref(fn(&State)),
     RefMut(fn(&mut State)),
