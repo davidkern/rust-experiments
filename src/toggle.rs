@@ -36,11 +36,11 @@ where
     receiver: Receiver<State>,
 }
 
-pub struct Mailbox<State> {
+pub struct Actor<State> {
     sender: Sender<State>
 }
 
-impl<State> Clone for Mailbox<State> {
+impl<State> Clone for Actor<State> {
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
@@ -55,15 +55,15 @@ impl<State> Process<State>
 where
     State: Inspectable + Mutable + Debug,
 {
-    pub fn new_with_state(state: State) -> (Self, Mailbox<State>) {
+    pub fn new_with_state(state: State) -> (Self, Actor<State>) {
         let (sender, receiver) = unbounded_channel();
-        let actor = Self {
-            state,
-            receiver,
-        };
-        let mailbox = Mailbox::new_with_sender(sender);
-
-        (actor, mailbox)
+        (
+            Self {
+                state,
+                receiver,
+            },
+            Actor::new_with_sender(sender)
+        )
     }
 
     pub async fn start(&mut self) {
@@ -80,7 +80,7 @@ where
     }
 }
 
-impl<State> Mailbox<State>
+impl<State> Actor<State>
 where
     State: Debug,
 {
@@ -103,13 +103,13 @@ where
 // USAGE
 //
 pub async fn exercise_toggle() {
-    let (mut process_toggle, toggle) = Process::<Toggle>::new_with_state(Toggle::Alpha);
+    let (mut process, toggle) = Process::<Toggle>::new_with_state(Toggle::Alpha);
 
     let toggle_clone = toggle.clone();
 
     let (state, p1, p2) = tokio::join! {
         async move {
-            process_toggle.start().await;
+            process.start().await;
         },
         async move {
             toggle.toggle();
@@ -135,7 +135,7 @@ enum Toggle {
 impl Inspectable for Toggle { }
 impl Mutable for Toggle { }
 
-impl Mailbox<Toggle> {
+impl Actor<Toggle> {
     pub fn toggle(&self) {
         self.mutate(|state| {
             println!("state: {:?}", state);
