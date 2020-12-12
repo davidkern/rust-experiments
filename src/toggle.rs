@@ -11,7 +11,14 @@ use std::fmt::Debug;
 //
 
 pub enum Op<State> {
-    Mutate(fn(&mut State))
+    Inspect(fn(&State)),
+    Mutate(fn(&mut State)),
+}
+
+pub trait Inspectable {
+    fn inspect(&self, inspector: fn(&Self)) {
+        inspector(self);
+    }
 }
 
 pub trait Mutable
@@ -21,7 +28,7 @@ pub trait Mutable
     }
 }
 
-pub struct Actor<State>
+pub struct Process<State>
 where
     State: Mutable,
 {
@@ -30,13 +37,13 @@ where
 }
 
 pub struct Mailbox<State> {
-    actor: Sender<State>
+    sender: Sender<State>
 }
 
 impl<State> Clone for Mailbox<State> {
     fn clone(&self) -> Self {
         Self {
-            actor: self.actor.clone(),
+            sender: self.sender.clone(),
         }
     }
 }
@@ -44,9 +51,9 @@ impl<State> Clone for Mailbox<State> {
 type Receiver<State> = UnboundedReceiver<Op<State>>;
 type Sender<State> = UnboundedSender<Op<State>>;
 
-impl<State> Actor<State>
+impl<State> Process<State>
 where
-    State: Mutable + Debug,
+    State: Inspectable + Mutable + Debug,
 {
     pub fn new_with_state(state: State) -> (Self, Mailbox<State>) {
         let (sender, receiver) = unbounded_channel();
@@ -62,6 +69,9 @@ where
     pub async fn start(&mut self) {
         while let Some(op) = self.receiver.recv().await {
             match op {
+                Op::Inspect(inspector) => {
+                    self.state.inspect(inspector);
+                },
                 Op::Mutate(mutator) => {
                     self.state.mutate(mutator);
                 }
@@ -76,12 +86,12 @@ where
 {
     pub fn new_with_sender(sender: Sender<State>) -> Self {
         Self {
-            actor: sender,
+            sender,
         }
     }
 
     pub fn mutate(&self, mutator: fn(&mut State)) {
-        self.actor.send(Op::Mutate(mutator)).ok();
+        self.sender.send(Op::Mutate(mutator)).ok();
     }
 
     // pub async fn mutate_and_reply(&self, mutator: fn(&mut State)) -> &State {
@@ -93,13 +103,13 @@ where
 // USAGE
 //
 pub async fn exercise_toggle() {
-    let (mut actor_toggle, toggle) = Actor::<Toggle>::new_with_state(Toggle::Alpha);
+    let (mut process_toggle, toggle) = Process::<Toggle>::new_with_state(Toggle::Alpha);
 
     let toggle_clone = toggle.clone();
 
     let (state, p1, p2) = tokio::join! {
         async move {
-            actor_toggle.start().await;
+            process_toggle.start().await;
         },
         async move {
             toggle.toggle();
@@ -122,6 +132,7 @@ enum Toggle {
     Beta,
 }
 
+impl Inspectable for Toggle { }
 impl Mutable for Toggle { }
 
 impl Mailbox<Toggle> {
