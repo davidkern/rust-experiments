@@ -3,12 +3,18 @@
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel, UnboundedReceiver};
 use std::ops::Deref;
 use crate::System;
+use std::future::Future;
 
 //
 // IMPLEMENTATION
 //
 
-pub struct Actor<Message, State> {
+pub trait ActorState<Message> {
+    fn receive(&mut self, msg: Message) {
+    }
+}
+
+pub struct Actor<State, Message> {
     state: State,
     receiver: Receiver<Message>,
 }
@@ -20,7 +26,10 @@ pub struct Mailbox<Message> {
 type Receiver<State> = UnboundedReceiver<State>;
 type Sender<State> = UnboundedSender<State>;
 
-impl<Message, State> Actor<Message, State> {
+impl<State, Message> Actor<State, Message>
+where
+    State: ActorState<Message>,
+{
     pub fn new_with_state(state: State) -> (Self, Mailbox<Message>) {
         let (sender, receiver) = unbounded_channel();
         let actor = Self {
@@ -30,6 +39,12 @@ impl<Message, State> Actor<Message, State> {
         let mailbox = Mailbox::new_with_sender(sender);
 
         (actor, mailbox)
+    }
+
+    pub async fn start(&mut self) {
+        while let Some(msg) = self.receiver.recv().await {
+            self.state.receive(msg);
+        }
     }
 }
 
@@ -46,7 +61,12 @@ impl<Message> Mailbox<Message> {
 //
 
 fn exercise_toggle() {
+    let (actor_toggle, toggle) = Actor::<ToggleState, Toggle>::new_with_state(ToggleState::Alpha);
 
+    // tokio::spawn(async { actor_toggle.start().await; }).await.unwrap();
+    //
+    // toggle.toggle().await;
+    // toggle.toggle().await;
 }
 
 struct Toggle;
@@ -56,8 +76,10 @@ enum ToggleState {
     Beta,
 }
 
+impl ActorState<Toggle> for ToggleState { }
+
 impl Actor<Toggle, ToggleState> {
-    async fn toggle(&self) {
+    pub async fn toggle(&self) {
     }
 }
 
