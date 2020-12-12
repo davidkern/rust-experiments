@@ -10,6 +10,10 @@ use std::fmt::Debug;
 // IMPLEMENTATION
 //
 
+pub enum Op<State> {
+    Mutate(fn(&mut State))
+}
+
 pub trait Mutable
 {
     fn mutate(&mut self, mutator: fn(&mut Self)) {
@@ -29,8 +33,16 @@ pub struct Mailbox<State> {
     actor: Sender<State>
 }
 
-type Receiver<State> = UnboundedReceiver<fn(&mut State)>;
-type Sender<State> = UnboundedSender<fn(&mut State)>;
+impl<State> Clone for Mailbox<State> {
+    fn clone(&self) -> Self {
+        Self {
+            actor: self.actor.clone(),
+        }
+    }
+}
+
+type Receiver<State> = UnboundedReceiver<Op<State>>;
+type Sender<State> = UnboundedSender<Op<State>>;
 
 impl<State> Actor<State>
 where
@@ -48,8 +60,12 @@ where
     }
 
     pub async fn start(&mut self) {
-        while let Some(mutator) = self.receiver.recv().await {
-            self.state.mutate(mutator);
+        while let Some(op) = self.receiver.recv().await {
+            match op {
+                Op::Mutate(mutator) => {
+                    self.state.mutate(mutator);
+                }
+            }
         }
     }
 }
@@ -65,8 +81,12 @@ where
     }
 
     pub fn mutate(&self, mutator: fn(&mut State)) {
-        self.actor.send(mutator).ok();
+        self.actor.send(Op::Mutate(mutator)).ok();
     }
+
+    // pub async fn mutate_and_reply(&self, mutator: fn(&mut State)) -> &State {
+    //
+    // }
 }
 
 //
@@ -75,7 +95,9 @@ where
 pub async fn exercise_toggle() {
     let (mut actor_toggle, toggle) = Actor::<Toggle>::new_with_state(Toggle::Alpha);
 
-    let (state, execution) = tokio::join! {
+    let toggle_clone = toggle.clone();
+
+    let (state, p1, p2) = tokio::join! {
         async move {
             actor_toggle.start().await;
         },
@@ -84,6 +106,12 @@ pub async fn exercise_toggle() {
             toggle.toggle();
             toggle.toggle();
             toggle.toggle();
+        },
+        async move {
+            toggle_clone.toggle();
+            toggle_clone.toggle();
+            toggle_clone.toggle();
+            toggle_clone.toggle();
         },
     };
 }
@@ -107,49 +135,3 @@ impl Mailbox<Toggle> {
         });
     }
 }
-
-// // INFINITE LOOP with types
-// // Type definition toggles as the state toggles (!)
-// pub type Receiver = UnboundedReceiver<State>;
-// pub struct Toggle(UnboundedSender<State>);
-//
-// struct ToggleActor(Receiver);
-//
-// enum State {
-//     Alpha,
-//     Beta,
-// }
-//
-// impl Deref for Toggle {
-//     type Target = UnboundedSender<State>;
-//
-//     fn deref(&self) -> &Self::Target {
-//         &self.0
-//     }
-// }
-//
-// impl Toggle {
-//     pub fn actor() -> (Toggle, State) {
-//         let (sender, receiver) = unbounded_channel();
-//
-//
-//         (Toggle(sender), State::Alpha)
-//     }
-//
-//     pub async fn start(&mut self) {
-//         while let Some(msg) = self.recv().await {
-//             self.state()
-//         }
-//     }
-//
-//     pub fn state(self) -> Self {
-//         match self {
-//             Self::Alpha => Self::Beta,
-//             Self::Beta => Self::Alpha,
-//         }
-//     }
-//
-//     pub fn toggle(&self) -> &Self {
-//
-//     }
-// }
