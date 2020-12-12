@@ -2,6 +2,10 @@
 
 Rust experiments.
 
+## Experiments
+
+* [async-actors](https://github.com/davidkern/rust-experiments/tree/async-actor) - Simple actor system on top of tokio
+
 ## License
 
 Licensed under either of
