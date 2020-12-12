@@ -1,6 +1,11 @@
 //struct Actor<T> {}
 
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{
+    UnboundedSender,
+    unbounded_channel,
+    UnboundedReceiver
+};
+use tokio::sync::oneshot;
 use std::ops::Deref;
 use crate::{System, State};
 use std::future::Future;
@@ -28,6 +33,17 @@ pub trait Mutable
     }
 }
 
+// pub trait Measurable<Data>
+// {
+//     fn measure(&self, extractor: fn(&Self) -> Data) {
+//         measure(self)
+//     }
+// }
+
+impl<State> Inspectable for State { }
+impl<State> Mutable for State { }
+//impl<State, Data> Measurable<Data> for State { }
+
 pub struct Process<State>
 where
     State: Mutable,
@@ -50,6 +66,7 @@ impl<State> Clone for Actor<State> {
 
 type Receiver<State> = UnboundedReceiver<Op<State>>;
 type Sender<State> = UnboundedSender<Op<State>>;
+type Reply<Data> = oneshot::Sender<Data>;
 
 impl<State> Process<State>
 where
@@ -74,7 +91,7 @@ where
                 },
                 Op::Mutate(mutator) => {
                     self.state.mutate(mutator);
-                }
+                },
             }
         }
     }
@@ -111,7 +128,7 @@ pub async fn exercise_toggle() {
 
     let toggle_clone = toggle.clone();
 
-    let (state, p1, p2) = tokio::join! {
+    let (process, task1, task2) = tokio::join! {
         async move {
             process.start().await;
         },
@@ -139,9 +156,6 @@ enum Toggle {
     Alpha,
     Beta,
 }
-
-impl Inspectable for Toggle { }
-impl Mutable for Toggle { }
 
 impl Actor<Toggle> {
     pub fn toggle(&self) {
