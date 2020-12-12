@@ -15,31 +15,12 @@ use std::fmt::Debug;
 // IMPLEMENTATION
 //
 
-pub enum Op<State> {
-    Inspect(fn(&State)),
-    Mutate(fn(&mut State)),
+pub enum Call<State> {
+    Ref(fn(&State)),
+    RefMut(fn(&mut State)),
 }
-
-pub trait Inspectable {
-    fn inspect(&self, inspector: fn(&Self)) {
-        inspector(self);
-    }
-}
-
-pub trait Mutable
-{
-    fn mutate(&mut self, mutator: fn(&mut Self)) {
-        mutator(self);
-    }
-}
-
-impl<State> Inspectable for State { }
-impl<State> Mutable for State { }
-//impl<State, Data> Measurable<Data> for State { }
 
 pub struct Process<State>
-where
-    State: Mutable,
 {
     state: State,
     receiver: CallReceiver<State>,
@@ -57,13 +38,13 @@ impl<State> Clone for Actor<State> {
     }
 }
 
-type CallReceiver<State> = UnboundedReceiver<Op<State>>;
-type CallSender<State> = UnboundedSender<Op<State>>;
+type CallReceiver<State> = UnboundedReceiver<Call<State>>;
+type CallSender<State> = UnboundedSender<Call<State>>;
 type ReplySender<Reply> = oneshot::Sender<Reply>;
 
 impl<State> Process<State>
 where
-    State: Inspectable + Mutable + Debug,
+    State: Debug,
 {
     pub fn new_with_state(state: State) -> (Self, Actor<State>) {
         let (sender, receiver) = unbounded_channel();
@@ -79,11 +60,11 @@ where
     pub async fn start(&mut self) {
         while let Some(op) = self.receiver.recv().await {
             match op {
-                Op::Inspect(inspector) => {
-                    self.state.inspect(inspector);
+                Call::Ref(caller) => {
+                    caller(&self.state);
                 },
-                Op::Mutate(mutator) => {
-                    self.state.mutate(mutator);
+                Call::RefMut(caller) => {
+                    caller(&mut self.state);
                 },
             }
         }
@@ -100,12 +81,12 @@ where
         }
     }
 
-    pub fn inspect(&self, inspector: fn(&State)) {
-        self.sender.send(Op::Inspect(inspector)).ok();
+    pub fn call_ref(&self, caller: fn(&State)) {
+        self.sender.send(Call::Ref(caller)).ok();
     }
 
-    pub fn mutate(&self, mutator: fn(&mut State)) {
-        self.sender.send(Op::Mutate(mutator)).ok();
+    pub fn call_ref_mut(&self, caller: fn(&mut State)) {
+        self.sender.send(Call::RefMut(caller)).ok();
     }
 
     // pub async fn mutate_and_reply(&self, mutator: fn(&mut State)) -> &State {
@@ -126,7 +107,7 @@ pub async fn exercise_toggle() {
             process.start().await;
         },
         async move {
-            toggle.inspect(|state| {
+            toggle.call_ref(|state| {
                 println!("inspect: {:?}", state);
             });
 
@@ -152,7 +133,7 @@ enum Toggle {
 
 impl Actor<Toggle> {
     pub fn toggle(&self) {
-        self.mutate(|state| {
+        self.call_ref_mut(|state| {
             println!("state: {:?}", state);
             match state {
                Toggle::Alpha => *state = Toggle::Beta,
